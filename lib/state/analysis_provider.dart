@@ -7,7 +7,6 @@ import '../models/analysis_snapshot.dart';
 import '../models/detection.dart';
 import '../models/lego_part.dart';
 import '../services/brickognize_client.dart';
-import '../services/brickognize_pipeline.dart';
 import '../services/element_lookup.dart';
 import '../services/history_service.dart';
 import '../services/kie_client.dart';
@@ -27,12 +26,6 @@ final rebrickableClientProvider = Provider<RebrickableClient>((ref) {
   return RebrickableClient(apiKey: dotenv.env['REBRICKABLE_API_KEY'] ?? '');
 });
 
-final brickognizePipelineProvider = Provider<BrickognizePipeline>((ref) {
-  return BrickognizePipeline(
-    brickognize: ref.watch(brickognizeClientProvider),
-  );
-});
-
 final historyServiceProvider =
     Provider<HistoryService>((ref) => HistoryService());
 
@@ -46,11 +39,7 @@ class AnalysisState {
   final String? setLabel;
   final List<AnalysisSnapshot> pastRuns; // matched-by-fingerprint history
   final bool loadedFromHistory;
-  final int progressDone;
-  final int progressTotal;
   final String progressLabel;
-  final List<RawIdentification> rawHits;
-  final int bboxesFound;
 
   const AnalysisState({
     this.inventoryImage,
@@ -62,11 +51,7 @@ class AnalysisState {
     this.setLabel,
     this.pastRuns = const [],
     this.loadedFromHistory = false,
-    this.progressDone = 0,
-    this.progressTotal = 0,
     this.progressLabel = '',
-    this.rawHits = const [],
-    this.bboxesFound = 0,
   });
 
   AnalysisState copyWith({
@@ -81,11 +66,7 @@ class AnalysisState {
     bool clearSetLabel = false,
     List<AnalysisSnapshot>? pastRuns,
     bool? loadedFromHistory,
-    int? progressDone,
-    int? progressTotal,
     String? progressLabel,
-    List<RawIdentification>? rawHits,
-    int? bboxesFound,
   }) =>
       AnalysisState(
         inventoryImage: inventoryImage ?? this.inventoryImage,
@@ -97,21 +78,15 @@ class AnalysisState {
         setLabel: clearSetLabel ? null : (setLabel ?? this.setLabel),
         pastRuns: pastRuns ?? this.pastRuns,
         loadedFromHistory: loadedFromHistory ?? this.loadedFromHistory,
-        progressDone: progressDone ?? this.progressDone,
-        progressTotal: progressTotal ?? this.progressTotal,
         progressLabel: progressLabel ?? this.progressLabel,
-        rawHits: rawHits ?? this.rawHits,
-        bboxesFound: bboxesFound ?? this.bboxesFound,
       );
 }
 
 class AnalysisController extends StateNotifier<AnalysisState> {
   final KieClient _client;
-  final BrickognizePipeline _pipeline;
   final HistoryService _history;
   final RebrickableClient _rebrickable;
-  AnalysisController(
-      this._client, this._pipeline, this._history, this._rebrickable)
+  AnalysisController(this._client, this._history, this._rebrickable)
       : super(const AnalysisState());
 
   void reset() => state = const AnalysisState();
@@ -132,7 +107,6 @@ class AnalysisController extends StateNotifier<AnalysisState> {
     );
     try {
       final parts = await _rebrickable.fetchSetParts(setNumber);
-      // Check history for the same LEGO set.
       final snap = AnalysisSnapshot(
         id: '_tmp',
         createdAt: DateTime.now(),
@@ -163,10 +137,9 @@ class AnalysisController extends StateNotifier<AnalysisState> {
 
       // Convert LEGO Element IDs (printed in instructions) to BrickLink-style
       // Design IDs so downstream Brickognize matching works.
-      // Strategy: try offline mapping first (bundled asset), fall back to
-      // Rebrickable API for anything unresolved, if configured.
       final needsResolve = parts
-          .where((p) => p.partId.length >= 6 && RegExp(r'^\d+$').hasMatch(p.partId))
+          .where((p) =>
+              p.partId.length >= 6 && RegExp(r'^\d+$').hasMatch(p.partId))
           .map((p) => p.partId)
           .toSet();
       if (needsResolve.isNotEmpty) {
@@ -213,48 +186,7 @@ class AnalysisController extends StateNotifier<AnalysisState> {
     state = state.copyWith(inventory: parts);
   }
 
-  Future<void> analyzePile(File image) async {
-    state = state.copyWith(
-      pileImage: image,
-      busy: true,
-      clearError: true,
-      progressDone: 0,
-      progressTotal: 0,
-      progressLabel: 'Сканирую кучу…',
-    );
-    try {
-      final result = await _pipeline.identify(
-        image,
-        state.inventory,
-        onProgress: (p) {
-          if (!mounted) return;
-          state = state.copyWith(
-            progressDone: p.done,
-            progressTotal: p.total,
-            progressLabel: p.label,
-          );
-        },
-      );
-      state = state.copyWith(
-        detections: result.detections,
-        rawHits: result.rawHits,
-        bboxesFound: result.bboxesFound,
-        busy: false,
-        progressDone: state.progressTotal,
-      );
-      await _history.save(
-        inventory: state.inventory,
-        detections: result.detections,
-        setLabel: state.setLabel,
-        pileImage: image,
-        inventoryImage: state.inventoryImage,
-      );
-    } catch (e) {
-      state = state.copyWith(busy: false, error: e.toString());
-    }
-  }
-
-  /// Externally-produced detections (e.g. from TapIdentifyScreen) — save and
+  /// Externally-produced detections (from TapIdentifyScreen) — save and
   /// put them into state so ResultScreen can render.
   Future<void> commitDetections(List<Detection> detections,
       {required File pileImage}) async {
@@ -276,9 +208,8 @@ class AnalysisController extends StateNotifier<AnalysisState> {
   /// Load a past snapshot into state, bypassing network calls.
   void loadSnapshot(AnalysisSnapshot s) {
     state = AnalysisState(
-      inventoryImage: s.inventoryImagePath != null
-          ? File(s.inventoryImagePath!)
-          : null,
+      inventoryImage:
+          s.inventoryImagePath != null ? File(s.inventoryImagePath!) : null,
       pileImage: s.pileImagePath != null ? File(s.pileImagePath!) : null,
       inventory: s.inventory,
       detections: s.detections,
@@ -291,8 +222,7 @@ class AnalysisController extends StateNotifier<AnalysisState> {
 final analysisProvider =
     StateNotifierProvider<AnalysisController, AnalysisState>((ref) {
   final client = ref.watch(kieClientProvider);
-  final pipeline = ref.watch(brickognizePipelineProvider);
   final history = ref.watch(historyServiceProvider);
   final rebrickable = ref.watch(rebrickableClientProvider);
-  return AnalysisController(client, pipeline, history, rebrickable);
+  return AnalysisController(client, history, rebrickable);
 });

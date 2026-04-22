@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/detection.dart';
 import '../models/lego_part.dart';
 import '../state/analysis_provider.dart';
-import '../theme.dart';
 import '../widgets/bbox_overlay.dart';
 import '../widgets/cropped_thumb.dart';
 import '../widgets/parts_sheet.dart';
@@ -59,13 +58,6 @@ class ResultScreen extends ConsumerWidget {
               ),
             ),
           ),
-          if (detections.isEmpty && st.rawHits.isNotEmpty)
-            Positioned(
-              left: 12,
-              right: 12,
-              top: 12,
-              child: _DiagnosticBanner(st: st),
-            ),
           PartsSheet(inventory: inventory, foundCounts: foundCounts),
         ],
       ),
@@ -191,68 +183,4 @@ class ResultScreen extends ConsumerWidget {
       );
 }
 
-class _DiagnosticBanner extends StatelessWidget {
-  final AnalysisState st;
-  const _DiagnosticBanner({required this.st});
-
-  @override
-  Widget build(BuildContext context) {
-    final identified = st.rawHits.length;
-    final bboxes = st.bboxesFound;
-    final inv = st.inventory;
-
-    // Heuristic: if inventory uses long (≥6 digit) ids and Brickognize returned
-    // short (≤5 digit) ids, it's the classic element_id vs design_id mismatch.
-    bool idFormatMismatch = false;
-    if (inv.isNotEmpty) {
-      final invLong = inv.where((p) => p.partId.length >= 6).length;
-      final hitsShort = st.rawHits
-          .where((h) => h.partId.isNotEmpty && h.partId.length <= 5)
-          .length;
-      idFormatMismatch = invLong >= inv.length * 0.7 &&
-          hitsShort >= identified * 0.7;
-    }
-
-    final hint = idFormatMismatch
-        ? 'Похоже на несовпадение форматов part_id: в инвентаре — Element IDs (7-значные), Brickognize возвращает Design IDs (4-5 значные). Попробуй загрузить набор с Rebrickable на шаге 1.'
-        : 'Brickognize опознал $identified деталей из $bboxes рамок, но их part_id не совпадают с инвентарём.';
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.bad.withValues(alpha: 0.18),
-        borderRadius: BorderRadius.circular(12),
-        border:
-            Border.all(color: AppColors.bad.withValues(alpha: 0.6), width: 1),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.warning_amber_rounded,
-              color: AppColors.bad, size: 24),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Ничего не совпало с инвентарём',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 14,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  hint,
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 

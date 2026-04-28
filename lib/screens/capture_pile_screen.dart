@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import '../state/analysis_provider.dart';
 import '../theme.dart';
 import '../widgets/scanner_corners.dart';
+import 'auto_detect_screen.dart';
 import 'tap_identify_screen.dart';
 
 class CapturePileScreen extends ConsumerStatefulWidget {
@@ -26,7 +27,15 @@ class _CapturePileScreenState extends ConsumerState<CapturePileScreen> {
     setState(() => _picked = File(x.path));
   }
 
-  void _start() {
+  void _startAuto() {
+    final f = _picked;
+    if (f == null) return;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => AutoDetectScreen(pileImage: f),
+    ));
+  }
+
+  void _startTap() {
     final f = _picked;
     if (f == null) return;
     Navigator.of(context).push(MaterialPageRoute(
@@ -47,7 +56,7 @@ class _CapturePileScreenState extends ConsumerState<CapturePileScreen> {
             _Hint(
               icon: Icons.tips_and_updates_outlined,
               text:
-                  'Сфотографируй кучу сверху. На следующем экране тапай по каждой детали — Brickognize её определит.',
+                  'Сфотографируй кучу сверху, при ровном освещении. Авто-режим найдёт все детали из инвентаря сразу.',
             ),
             const SizedBox(height: 12),
             Expanded(
@@ -94,9 +103,21 @@ class _CapturePileScreenState extends ConsumerState<CapturePileScreen> {
             SizedBox(
               height: 56,
               child: FilledButton.icon(
-                onPressed: (_picked == null || busy) ? null : _start,
-                icon: const Icon(Icons.touch_app_rounded),
-                label: const Text('Перейти к опознанию'),
+                onPressed: (_picked == null || busy) ? null : _startAuto,
+                icon: const Icon(Icons.auto_awesome_rounded),
+                label: const Text('Авто-определение'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 44,
+              child: OutlinedButton.icon(
+                onPressed: (_picked == null || busy) ? null : _startTap,
+                icon: const Icon(Icons.touch_app_outlined, size: 18),
+                label: const Text(
+                  'Ручной тап-режим',
+                  style: TextStyle(fontSize: 13),
+                ),
               ),
             ),
           ],

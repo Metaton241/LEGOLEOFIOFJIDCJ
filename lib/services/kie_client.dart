@@ -80,23 +80,55 @@ class KieClient {
     final raw = dets
         .whereType<Map>()
         .map((m) => Detection.fromJson(m.cast<String, dynamic>()))
-        .where((d) => d.partId.isNotEmpty && d.bbox.length == 4)
+        .where((d) =>
+            d.partId.isNotEmpty &&
+            d.bbox.length == 4 &&
+            d.w >= 0.015 && // at least 1.5% of image width
+            d.h >= 0.015 &&
+            d.confidence >= 0.65) // keep only confident matches
         .toList();
-    return _dedup(raw);
+    return _postProcess(raw, parts);
   }
 
-  /// Remove only obvious duplicates: if two boxes overlap more than 55% IoU,
-  /// keep the higher-confidence one. Does NOT filter by color, qty, or
-  /// confidence threshold — intentionally lenient.
-  static List<Detection> _dedup(List<Detection> raw) {
-    if (raw.length < 2) return raw;
-    final sorted = [...raw]..sort((a, b) => b.confidence.compareTo(a.confidence));
+  /// Tighten model output:
+  /// 1. If `inventory` is non-empty, drop detections whose part_id is not in it.
+  /// 2. Global NMS at IoU > 0.25 (cross-class) — eliminates the most common
+  ///    failure where the model emits 2-3 boxes for the same physical brick
+  ///    under different part_ids.
+  /// 3. Cap per part_id to inventory qty exactly (no slack).
+  static List<Detection> _postProcess(
+      List<Detection> raw, List<LegoPart> inventory) {
+    if (raw.isEmpty) return raw;
+
+    final qtyByPart = <String, int>{};
+    for (final p in inventory) {
+      qtyByPart[p.partId] = p.qty;
+    }
+    final filtered = qtyByPart.isEmpty
+        ? raw
+        : raw.where((d) => qtyByPart.containsKey(d.partId)).toList();
+
+    // Global NMS (cross-class) — sorts by confidence desc, keeps non-overlapping.
+    filtered.sort((a, b) => b.confidence.compareTo(a.confidence));
     final kept = <Detection>[];
-    for (final d in sorted) {
-      final clashes = kept.any((k) => _iou(d, k) > 0.55);
+    for (final d in filtered) {
+      final clashes = kept.any((k) => _iou(d, k) > 0.25);
       if (!clashes) kept.add(d);
     }
-    return kept;
+
+    if (qtyByPart.isEmpty) return kept;
+
+    // Cap per part_id to exact inventory qty — sorted-by-confidence first.
+    final perPart = <String, int>{};
+    final capped = <Detection>[];
+    for (final d in kept) {
+      final target = qtyByPart[d.partId] ?? 0;
+      final already = perPart[d.partId] ?? 0;
+      if (already >= target) continue;
+      capped.add(d);
+      perPart[d.partId] = already + 1;
+    }
+    return capped;
   }
 
   static double _iou(Detection a, Detection b) {

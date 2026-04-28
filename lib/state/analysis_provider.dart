@@ -186,6 +186,42 @@ class AnalysisController extends StateNotifier<AnalysisState> {
     state = state.copyWith(inventory: parts);
   }
 
+  /// Auto-detect mode: send the whole pile photo to Gemini/Claude (via
+  /// kie.ai) and ask the model to locate every visible part from the
+  /// inventory. Each detection is annotated with its inventory name and
+  /// `matched` flag, then committed.
+  Future<void> analyzePileAuto(File pileImage) async {
+    state = state.copyWith(
+      pileImage: pileImage,
+      busy: true,
+      clearError: true,
+      progressLabel: 'Ищу детали в куче…',
+    );
+    try {
+      final raw = await _client.findParts(pileImage, state.inventory);
+      final byId = {for (final p in state.inventory) p.partId: p};
+      final inventoryIds = byId.keys.toSet();
+      final detections = raw
+          .map((d) => Detection(
+                partId: d.partId,
+                bbox: d.bbox,
+                confidence: d.confidence,
+                name: d.name ?? byId[d.partId]?.name,
+                matched: inventoryIds.isEmpty ||
+                    inventoryIds.contains(d.partId),
+              ))
+          .toList();
+      await commitDetections(detections, pileImage: pileImage);
+      state = state.copyWith(busy: false, progressLabel: '');
+    } catch (e) {
+      state = state.copyWith(
+        busy: false,
+        error: e.toString(),
+        progressLabel: '',
+      );
+    }
+  }
+
   /// Externally-produced detections (from TapIdentifyScreen) — save and
   /// put them into state so ResultScreen can render.
   Future<void> commitDetections(List<Detection> detections,

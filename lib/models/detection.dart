@@ -18,17 +18,42 @@ class Detection {
   double get w => bbox[2];
   double get h => bbox[3];
 
+  /// Accepts either:
+  ///   - `box_2d`: [ymin, xmin, ymax, xmax] integers 0..1000 (Gemini native)
+  ///   - `bbox`:   [x, y, w, h] floats 0..1 (legacy)
   factory Detection.fromJson(Map<String, dynamic> j) {
-    final raw = (j['bbox'] as List?) ?? const [];
-    final nums =
-        raw.map((e) => (e is num) ? e.toDouble() : 0.0).toList(growable: false);
-    final bbox = nums.length == 4 ? nums : <double>[0, 0, 0, 0];
+    List<double> xywh;
+    if (j['box_2d'] is List) {
+      final raw = j['box_2d'] as List;
+      final nums = raw
+          .map((e) => (e is num) ? e.toDouble() : 0.0)
+          .toList(growable: false);
+      if (nums.length == 4) {
+        final ymin = nums[0] / 1000.0;
+        final xmin = nums[1] / 1000.0;
+        final ymax = nums[2] / 1000.0;
+        final xmax = nums[3] / 1000.0;
+        final x = xmin.clamp(0.0, 1.0);
+        final y = ymin.clamp(0.0, 1.0);
+        final w = (xmax - xmin).clamp(0.0, 1.0);
+        final h = (ymax - ymin).clamp(0.0, 1.0);
+        xywh = [x, y, w, h];
+      } else {
+        xywh = const [0, 0, 0, 0];
+      }
+    } else {
+      final raw = (j['bbox'] as List?) ?? const [];
+      final nums = raw
+          .map((e) => (e is num) ? e.toDouble() : 0.0)
+          .toList(growable: false);
+      xywh = nums.length == 4 ? nums : const [0, 0, 0, 0];
+    }
+
     return Detection(
       partId: (j['part_id'] ?? '').toString(),
-      bbox: bbox,
-      confidence: (j['confidence'] is num)
-          ? (j['confidence'] as num).toDouble()
-          : 0.0,
+      bbox: xywh,
+      confidence:
+          (j['confidence'] is num) ? (j['confidence'] as num).toDouble() : 0.0,
       name: j['name']?.toString(),
       matched: j['matched'] != false, // default true for backward-compat
     );

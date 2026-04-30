@@ -8,6 +8,7 @@ import '../models/lego_part.dart';
 import 'image_service.dart';
 import 'prompts.dart';
 import 'proxy_config.dart';
+import 'vless_tunnel.dart';
 
 class KieException implements Exception {
   final String message;
@@ -40,10 +41,10 @@ class KieClient {
   int _qualityFor(String m) => _isClaude(m) ? 75 : 80;
 
   /// Short string included in error messages so users can tell whether the
-  /// request went through the proxy or direct.
+  /// request went through the embedded VLESS tunnel or direct.
   String get _proxyTag {
-    final cfg = ProxyConfig.fromEnv();
-    return cfg == null ? 'direct' : 'via ${cfg.host}:${cfg.port}';
+    final t = VlessTunnel.instance;
+    return t.running ? 'via VLESS@${t.port}' : 'direct';
   }
 
   KieClient({

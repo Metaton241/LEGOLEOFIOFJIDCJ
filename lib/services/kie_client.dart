@@ -201,12 +201,18 @@ class KieClient {
             };
 
       try {
+        // Authorization is sent only when an explicit API key is configured.
+        // When using the relay (`KIE_BASE_URL` points at the Cloudflare Worker),
+        // the key is held server-side and the client should NOT include it.
+        final headers = <String, String>{
+          'Content-Type': 'application/json',
+        };
+        if (_apiKey.isNotEmpty) {
+          headers['Authorization'] = 'Bearer $_apiKey';
+        }
         resp = await _dio.post(
           path,
-          options: Options(headers: {
-            'Authorization': 'Bearer $_apiKey',
-            'Content-Type': 'application/json',
-          }),
+          options: Options(headers: headers),
           data: data,
         );
       } on DioException catch (e) {

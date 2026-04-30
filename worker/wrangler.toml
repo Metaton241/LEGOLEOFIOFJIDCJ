@@ -1,0 +1,11 @@
+name = "twink-relay"
+main = "src/index.ts"
+compatibility_date = "2026-04-30"
+
+# Custom domain binding is configured in the Cloudflare Dashboard
+# (Workers → twink-relay → Triggers → Custom Domains).
+# Alternatively, uncomment and edit the route below before `wrangler deploy`:
+#
+# routes = [
+#   { pattern = "relay.your-domain.com/*", zone_name = "your-domain.com" }
+# ]

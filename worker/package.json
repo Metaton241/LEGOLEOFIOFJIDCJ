@@ -1,0 +1,16 @@
+{
+  "name": "twink-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker that proxies kie.ai requests for TwinkLegoFinder.",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^3.80.0",
+    "@cloudflare/workers-types": "^4.20240909.0",
+    "typescript": "^5.6.0"
+  }
+}

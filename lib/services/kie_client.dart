@@ -22,13 +22,14 @@ class KieClient {
   final String _model;
 
   /// Models to fall back to (in order) when the primary returns
-  /// "currently being maintained" or a transient gateway error.
-  /// Cross-family is fine — _chat() picks the right endpoint per model.
+  /// "currently being maintained", "Model not supported", or a transient
+  /// gateway error. Cross-family is fine — _chat() picks the right endpoint
+  /// per model. Models are listed in order of preference; only currently
+  /// supported kie.ai models should appear here.
   static const List<String> _fallbackChain = [
-    'claude-sonnet-4-6',
-    'claude-sonnet-4-5',
-    'gemini-2.5-pro',
     'gemini-2.5-flash',
+    'gemini-2.5-pro',
+    'claude-sonnet-4-5',
   ];
 
   bool _isClaude(String m) => m.startsWith('claude-');
@@ -227,15 +228,22 @@ class KieClient {
         throw KieException(lastErr, rawResponse: e.response?.data?.toString());
       }
 
-      // kie.ai returns the maintenance error with HTTP 200 + envelope.
+      // kie.ai may return errors with HTTP 200 + envelope. Trigger fallback
+      // for: maintenance, "Model not supported"/"Operation not found"
+      // (model unavailable on this account / mistyped), and any 5xx.
       final d = resp.data;
-      if (d is Map &&
-          d['code'] is num &&
-          (d['code'] as num) >= 500 &&
-          (d['msg']?.toString() ?? '').toLowerCase().contains('maintained')) {
-        lastErr = 'kie.ai $m: ${d['msg']}';
-        resp = null;
-        continue; // try next model
+      if (d is Map && d['code'] is num) {
+        final code = (d['code'] as num).toInt();
+        final msg = (d['msg']?.toString() ?? '').toLowerCase();
+        final isUnavailable = code >= 500 && msg.contains('maintained');
+        final isUnsupported = (code == 422 || code == 500) &&
+            (msg.contains('not supported') ||
+                msg.contains('operation not found'));
+        if (isUnavailable || isUnsupported) {
+          lastErr = 'kie.ai $m: ${d['msg']}';
+          resp = null;
+          continue; // try next model in chain
+        }
       }
       break; // got a usable response
     }

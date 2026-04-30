@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
@@ -6,17 +7,13 @@ import 'package:dio/io.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_v2ray/flutter_v2ray.dart';
 
-/// Singleton wrapper around `flutter_v2ray` that runs an Xray-core inside the
-/// app process and exposes a local HTTP proxy at `127.0.0.1:_localPort`.
+/// Singleton that runs an embedded Xray-core inside the app process and
+/// exposes a local HTTP proxy on `127.0.0.1:_localPort`. Upstream protocol:
+/// VLESS+Reality. To DPI/RKN, traffic looks like a regular TLS handshake to
+/// the configured `serverName` (e.g. www.cloudflare.com).
 ///
-/// Mode is `proxyOnly: true` — Xray spawns a local listener inside our app
-/// only, no system VPN is created. This keeps us free from
-/// NEPacketTunnelProvider entitlement on iOS, which would require Apple
-/// approval. Only this app's HTTPS traffic is tunneled.
-///
-/// Upstream protocol: VLESS+Reality, configured via the URL passed to
-/// [start]. Xray-core handles the Reality TLS dance — to RKN/DPI the
-/// connection looks like a regular TLS handshake to `www.cloudflare.com`.
+/// Mode: `proxyOnly: true` — Xray runs in-process only, no system VPN. This
+/// avoids the iOS NEPacketTunnelProvider entitlement.
 class VlessTunnel {
   VlessTunnel._();
   static final VlessTunnel instance = VlessTunnel._();
@@ -47,12 +44,14 @@ class VlessTunnel {
       _initialized = true;
     }
 
-    final V2RayURL parser = FlutterV2ray.parseFromURL(vlessUrl);
-    final cfg = parser.getFullConfiguration();
+    final config = _buildConfig(vlessUrl, _localPort);
+    if (kDebugMode) {
+      debugPrint('[VlessTunnel] config inbound port: $_localPort');
+    }
 
     await _v2ray!.startV2Ray(
-      remark: parser.remark.isNotEmpty ? parser.remark : 'twink-vless',
-      config: cfg,
+      remark: 'twink-vless',
+      config: config,
       blockedApps: null,
       bypassSubnets: null,
       proxyOnly: true,
@@ -68,8 +67,8 @@ class VlessTunnel {
 
   /// Returns a Dio adapter that routes ALL HTTPS traffic through the local
   /// Xray HTTP-proxy. The TLS handshake to upstream still happens after
-  /// CONNECT — payload is end-to-end encrypted, the proxy operator (us)
-  /// cannot decrypt it.
+  /// CONNECT — payload is end-to-end encrypted, the proxy operator cannot
+  /// decrypt it.
   IOHttpClientAdapter buildAdapter() {
     return IOHttpClientAdapter(
       createHttpClient: () {
@@ -79,6 +78,137 @@ class VlessTunnel {
       },
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // Xray config construction (manual). Bypasses flutter_v2ray's parser whose
+  // default port is randomized — that broke our PROXY directive on the device.
+  // ---------------------------------------------------------------------------
+  static String _buildConfig(String vlessUrl, int httpPort) {
+    final p = _parseVless(vlessUrl);
+    final config = {
+      'log': {'loglevel': 'warning'},
+      'inbounds': [
+        {
+          'tag': 'http-in',
+          'port': httpPort,
+          'listen': '127.0.0.1',
+          'protocol': 'http',
+          'settings': {
+            'timeout': 0,
+          },
+          'sniffing': {
+            'enabled': true,
+            'destOverride': ['http', 'tls'],
+          },
+        },
+      ],
+      'outbounds': [
+        {
+          'tag': 'proxy',
+          'protocol': 'vless',
+          'settings': {
+            'vnext': [
+              {
+                'address': p.host,
+                'port': p.port,
+                'users': [
+                  {
+                    'id': p.uuid,
+                    'encryption': p.encryption,
+                    'flow': p.flow,
+                  },
+                ],
+              },
+            ],
+          },
+          'streamSettings': {
+            'network': p.network,
+            'security': p.security,
+            if (p.security == 'reality')
+              'realitySettings': {
+                'show': false,
+                'fingerprint': p.fingerprint,
+                'serverName': p.sni,
+                'publicKey': p.publicKey,
+                'shortId': p.shortId,
+                'spiderX': '',
+              }
+            else if (p.security == 'tls')
+              'tlsSettings': {
+                'serverName': p.sni,
+                'fingerprint': p.fingerprint,
+              },
+          },
+        },
+        {'tag': 'direct', 'protocol': 'freedom'},
+        {'tag': 'block', 'protocol': 'blackhole'},
+      ],
+      'routing': {
+        'domainStrategy': 'IPIfNonMatch',
+        'rules': [
+          {
+            'type': 'field',
+            'ip': ['geoip:private'],
+            'outboundTag': 'direct',
+          },
+        ],
+      },
+    };
+    return jsonEncode(config);
+  }
+
+  static _ParsedVless _parseVless(String url) {
+    // vless://uuid@host:port?param1=v&param2=v#remark
+    final u = Uri.parse(url);
+    if (u.scheme != 'vless') {
+      throw FormatException('Not a vless:// URL: $url');
+    }
+    final uuid = u.userInfo;
+    final host = u.host;
+    final port = u.port == 0 ? 443 : u.port;
+    final qp = u.queryParameters;
+    return _ParsedVless(
+      uuid: uuid,
+      host: host,
+      port: port,
+      encryption: qp['encryption'] ?? 'none',
+      flow: qp['flow'] ?? '',
+      network: qp['type'] ?? 'tcp',
+      security: qp['security'] ?? 'none',
+      sni: qp['sni'] ?? host,
+      fingerprint: qp['fp'] ?? 'chrome',
+      publicKey: qp['pbk'] ?? '',
+      shortId: qp['sid'] ?? '',
+    );
+  }
+}
+
+class _ParsedVless {
+  final String uuid;
+  final String host;
+  final int port;
+  final String encryption;
+  final String flow;
+  final String network;
+  final String security;
+  final String sni;
+  final String fingerprint;
+  final String publicKey;
+  final String shortId;
+
+  const _ParsedVless({
+    required this.uuid,
+    required this.host,
+    required this.port,
+    required this.encryption,
+    required this.flow,
+    required this.network,
+    required this.security,
+    required this.sni,
+    required this.fingerprint,
+    required this.publicKey,
+    required this.shortId,
+  });
 }
 
 /// Convenience: apply the running VLESS tunnel to a Dio. No-op if tunnel is

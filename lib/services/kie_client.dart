@@ -41,10 +41,13 @@ class KieClient {
   int _qualityFor(String m) => _isClaude(m) ? 75 : 80;
 
   /// Short string included in error messages so users can tell whether the
-  /// request went through the embedded VLESS tunnel or direct.
+  /// request went through the embedded VLESS tunnel or direct, AND the
+  /// current Xray status (DISCONNECTED reveals tunnel failed startup).
   String get _proxyTag {
     final t = VlessTunnel.instance;
-    return t.running ? 'via VLESS@${t.port}' : 'direct';
+    if (!t.running) return 'direct';
+    final s = t.status;
+    return s.isEmpty ? 'via VLESS@${t.port}' : 'via VLESS@${t.port} ($s)';
   }
 
   KieClient({

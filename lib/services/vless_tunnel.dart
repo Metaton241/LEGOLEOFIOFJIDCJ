@@ -44,38 +44,17 @@ class VlessTunnel {
       _initialized = true;
     }
 
-    // Build config: get outbound from parser (Xray-compatible), but REPLACE
-    // the inbound entirely with a clean HTTP listener. The default inbound
-    // from V2RayURL is SOCKS — its `settings.{auth,udp,...}` keys are
-    // SOCKS-specific and Xray rejects them when the protocol is "http",
-    // which causes the plugin's parseV2rayJsonFile to fail and the service
-    // to die without ever binding a listener.
-    String config;
-    try {
-      final parser = FlutterV2ray.parseFromURL(vlessUrl);
-      parser.inbound = {
-        'tag': 'http-in',
-        'port': _localPort,
-        'protocol': 'http',
-        'listen': '127.0.0.1',
-        'settings': {'timeout': 0},
-        'sniffing': {
-          'enabled': true,
-          'destOverride': ['http', 'tls'],
-        },
-      };
-      config = parser.getFullConfiguration();
-      if (kDebugMode) {
-        final preview = config.length > 600
-            ? '${config.substring(0, 600)}…'
-            : config;
-        debugPrint('[VlessTunnel] config preview: $preview');
-      }
-    } catch (e) {
-      if (kDebugMode) {
-        debugPrint('[VlessTunnel] parser failed ($e); using manual config');
-      }
-      config = _buildConfig(vlessUrl, _localPort);
+    // Build the full Xray config ourselves — skip flutter_v2ray's V2RayURL
+    // parser entirely. The parser's default user object contains odd fields
+    // (security=auto, level=8) that interact badly with the bundled Xray
+    // version on some setups, causing the core to fail startup → no listener
+    // binds → Connection Refused on every port we try.
+    final config = _buildConfig(vlessUrl, _localPort);
+    if (kDebugMode) {
+      final preview = config.length > 800
+          ? '${config.substring(0, 800)}…'
+          : config;
+      debugPrint('[VlessTunnel] config preview: $preview');
     }
 
     await _v2ray!.startV2Ray(
@@ -109,11 +88,42 @@ class VlessTunnel {
   }
 
   // ---------------------------------------------------------------------------
-  // Xray config construction (manual). Bypasses flutter_v2ray's parser whose
-  // default port is randomized — that broke our PROXY directive on the device.
+  // Minimal Xray config: HTTP inbound at 127.0.0.1:10808 + single VLESS+Reality
+  // outbound. No routing/dns/extra outbounds — those are common sources of
+  // startup failure on different libv2ray builds. The "user object" only has
+  // `id` + `encryption` (no `level`, `security`, `alterId`) which matches
+  // the Xray-core spec for VLESS users.
   // ---------------------------------------------------------------------------
   static String _buildConfig(String vlessUrl, int httpPort) {
     final p = _parseVless(vlessUrl);
+
+    final user = <String, dynamic>{
+      'id': p.uuid,
+      'encryption': p.encryption,
+    };
+    if (p.flow.isNotEmpty) user['flow'] = p.flow;
+
+    final stream = <String, dynamic>{
+      'network': p.network,
+      'security': p.security,
+    };
+    if (p.security == 'reality') {
+      stream['realitySettings'] = {
+        'show': false,
+        'fingerprint': p.fingerprint,
+        'serverName': p.sni,
+        'publicKey': p.publicKey,
+        'shortId': p.shortId,
+        'spiderX': '',
+      };
+    } else if (p.security == 'tls') {
+      stream['tlsSettings'] = {
+        'serverName': p.sni,
+        'fingerprint': p.fingerprint,
+        'allowInsecure': false,
+      };
+    }
+
     final config = {
       'log': {'loglevel': 'warning'},
       'inbounds': [
@@ -122,13 +132,7 @@ class VlessTunnel {
           'port': httpPort,
           'listen': '127.0.0.1',
           'protocol': 'http',
-          'settings': {
-            'timeout': 0,
-          },
-          'sniffing': {
-            'enabled': true,
-            'destOverride': ['http', 'tls'],
-          },
+          'settings': {'timeout': 0},
         },
       ],
       'outbounds': [
@@ -140,48 +144,13 @@ class VlessTunnel {
               {
                 'address': p.host,
                 'port': p.port,
-                'users': [
-                  {
-                    'id': p.uuid,
-                    'encryption': p.encryption,
-                    'flow': p.flow,
-                  },
-                ],
+                'users': [user],
               },
             ],
           },
-          'streamSettings': {
-            'network': p.network,
-            'security': p.security,
-            if (p.security == 'reality')
-              'realitySettings': {
-                'show': false,
-                'fingerprint': p.fingerprint,
-                'serverName': p.sni,
-                'publicKey': p.publicKey,
-                'shortId': p.shortId,
-                'spiderX': '',
-              }
-            else if (p.security == 'tls')
-              'tlsSettings': {
-                'serverName': p.sni,
-                'fingerprint': p.fingerprint,
-              },
-          },
+          'streamSettings': stream,
         },
-        {'tag': 'direct', 'protocol': 'freedom'},
-        {'tag': 'block', 'protocol': 'blackhole'},
       ],
-      'routing': {
-        'domainStrategy': 'IPIfNonMatch',
-        'rules': [
-          {
-            'type': 'field',
-            'ip': ['geoip:private'],
-            'outboundTag': 'direct',
-          },
-        ],
-      },
     };
     return jsonEncode(config);
   }

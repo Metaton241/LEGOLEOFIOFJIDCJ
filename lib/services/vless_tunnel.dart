@@ -44,9 +44,37 @@ class VlessTunnel {
       _initialized = true;
     }
 
-    final config = _buildConfig(vlessUrl, _localPort);
-    if (kDebugMode) {
-      debugPrint('[VlessTunnel] config inbound port: $_localPort');
+    // Hybrid approach: let flutter_v2ray's parser generate the outbound
+    // (it knows the exact format the bundled Xray-core expects), then we
+    // overwrite the inbounds with a deterministic HTTP listener on
+    // 127.0.0.1:_localPort. If the parser fails, fall back to a fully
+    // hand-built config.
+    String config;
+    try {
+      final parser = FlutterV2ray.parseFromURL(vlessUrl);
+      final raw = parser.getFullConfiguration();
+      final m = jsonDecode(raw) as Map<String, dynamic>;
+      m['inbounds'] = [
+        {
+          'tag': 'http-in',
+          'port': _localPort,
+          'listen': '127.0.0.1',
+          'protocol': 'http',
+          'settings': {'timeout': 0},
+        },
+      ];
+      // Drop routing rules that may interfere with proxy-only mode.
+      m.remove('routing');
+      config = jsonEncode(m);
+      if (kDebugMode) {
+        debugPrint('[VlessTunnel] parser config (outbound from package, '
+            'inbound overridden to 127.0.0.1:$_localPort)');
+      }
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('[VlessTunnel] parser failed ($e); using manual config');
+      }
+      config = _buildConfig(vlessUrl, _localPort);
     }
 
     await _v2ray!.startV2Ray(

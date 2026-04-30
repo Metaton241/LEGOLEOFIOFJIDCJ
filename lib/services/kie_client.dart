@@ -239,7 +239,10 @@ class KieClient {
             e.type == DioExceptionType.connectionTimeout ||
             e.type == DioExceptionType.sendTimeout ||
             e.type == DioExceptionType.receiveTimeout ||
-            e.type == DioExceptionType.connectionError;
+            e.type == DioExceptionType.connectionError ||
+            // Tunnel may close mid-response when upstream model is in
+            // maintenance — try next model in the chain.
+            e.type == DioExceptionType.unknown;
 
         // Build a richer message so the user can tell whether it's a TCP
         // failure (proxy unreachable), TLS issue, auth (407), or upstream.

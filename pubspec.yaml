@@ -1,7 +1,7 @@
 name: twink_lego_finder
 description: "LEGO part finder — scan inventory, find parts in a pile."
 publish_to: 'none'
-version: 1.4.4+13
+version: 1.5.0+14
 
 environment:
   sdk: ^3.11.4
@@ -19,7 +19,6 @@ dependencies:
 
   # Networking
   dio: ^5.7.0
-  flutter_v2ray: ^1.0.10
 
   # Storage
   flutter_secure_storage: ^9.2.2

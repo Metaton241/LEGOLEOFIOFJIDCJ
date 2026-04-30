@@ -1,15 +1,14 @@
 import 'package:dio/dio.dart';
 
-import 'vless_tunnel.dart';
-
-/// Apply the embedded VLESS+Reality tunnel to a Dio instance, if running.
-/// No-op when the tunnel hasn't booted yet — the client will hit the upstream
-/// directly and surface a connection error from there.
+/// No-op since v1.5.0. Each Dio client used to have its transport overridden
+/// here (HTTP CONNECT proxy in v1.3.x, in-process VLESS tunnel in v1.4.x);
+/// now we route via a Cloudflare Worker by simply pointing each client's
+/// `baseUrl` at `https://<worker>.workers.dev/...`. No HttpClient adapter
+/// changes are required.
 ///
-/// This wrapper is the single integration point used by KieClient,
-/// BrickognizeClient and RebrickableClient. It used to read PROXY_* env vars
-/// for an HTTP CONNECT proxy; that mode was removed in v1.4.0 in favour of
-/// the in-process VLESS tunnel.
+/// Kept as a hook so the three clients still call `applyEnvProxy(_dio)` —
+/// a future transport (system VPN, mTLS, etc.) can be slotted in here
+/// without touching every client again.
 void applyEnvProxy(Dio dio) {
-  applyTunnel(dio);
+  // intentionally empty
 }

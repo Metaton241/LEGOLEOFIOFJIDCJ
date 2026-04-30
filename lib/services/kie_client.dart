@@ -8,7 +8,6 @@ import '../models/lego_part.dart';
 import 'image_service.dart';
 import 'prompts.dart';
 import 'proxy_config.dart';
-import 'vless_tunnel.dart';
 
 class KieException implements Exception {
   final String message;
@@ -41,13 +40,14 @@ class KieClient {
   int _qualityFor(String m) => _isClaude(m) ? 75 : 80;
 
   /// Short string included in error messages so users can tell whether the
-  /// request went through the embedded VLESS tunnel or direct, AND the
-  /// current Xray status (DISCONNECTED reveals tunnel failed startup).
+  /// request went through the Cloudflare Worker relay or hit kie.ai directly.
   String get _proxyTag {
-    final t = VlessTunnel.instance;
-    if (!t.running) return 'direct';
-    final s = t.status;
-    return s.isEmpty ? 'via VLESS@${t.port}' : 'via VLESS@${t.port} ($s)';
+    final host = Uri.tryParse(_dio.options.baseUrl)?.host ?? '';
+    if (host.endsWith('workers.dev') || host.contains('.workers.dev/')) {
+      return 'via $host';
+    }
+    if (host.isEmpty || host.endsWith('api.kie.ai')) return 'direct';
+    return 'via $host';
   }
 
   KieClient({

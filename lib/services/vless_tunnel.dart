@@ -44,31 +44,32 @@ class VlessTunnel {
       _initialized = true;
     }
 
-    // Hybrid approach: let flutter_v2ray's parser generate the outbound
-    // (it knows the exact format the bundled Xray-core expects), then we
-    // overwrite the inbounds with a deterministic HTTP listener on
-    // 127.0.0.1:_localPort. If the parser fails, fall back to a fully
-    // hand-built config.
+    // Build config: get outbound from parser (Xray-compatible), but REPLACE
+    // the inbound entirely with a clean HTTP listener. The default inbound
+    // from V2RayURL is SOCKS — its `settings.{auth,udp,...}` keys are
+    // SOCKS-specific and Xray rejects them when the protocol is "http",
+    // which causes the plugin's parseV2rayJsonFile to fail and the service
+    // to die without ever binding a listener.
     String config;
     try {
       final parser = FlutterV2ray.parseFromURL(vlessUrl);
-      final raw = parser.getFullConfiguration();
-      final m = jsonDecode(raw) as Map<String, dynamic>;
-      m['inbounds'] = [
-        {
-          'tag': 'http-in',
-          'port': _localPort,
-          'listen': '127.0.0.1',
-          'protocol': 'http',
-          'settings': {'timeout': 0},
+      parser.inbound = {
+        'tag': 'http-in',
+        'port': _localPort,
+        'protocol': 'http',
+        'listen': '127.0.0.1',
+        'settings': {'timeout': 0},
+        'sniffing': {
+          'enabled': true,
+          'destOverride': ['http', 'tls'],
         },
-      ];
-      // Drop routing rules that may interfere with proxy-only mode.
-      m.remove('routing');
-      config = jsonEncode(m);
+      };
+      config = parser.getFullConfiguration();
       if (kDebugMode) {
-        debugPrint('[VlessTunnel] parser config (outbound from package, '
-            'inbound overridden to 127.0.0.1:$_localPort)');
+        final preview = config.length > 600
+            ? '${config.substring(0, 600)}…'
+            : config;
+        debugPrint('[VlessTunnel] config preview: $preview');
       }
     } catch (e) {
       if (kDebugMode) {

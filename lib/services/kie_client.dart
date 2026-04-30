@@ -22,25 +22,14 @@ class KieClient {
   final String _apiKey;
   final String _model;
 
-  /// Models to fall back to (in order) when the primary returns
-  /// "currently being maintained", "Model not supported", or a transient
-  /// gateway error. Cross-family is fine — _chat() picks the right endpoint
-  /// per model.
-  ///
-  /// Claude is intentionally excluded: kie.ai's claude endpoint typically
-  /// takes 60-180s for vision+JSON, which exceeds the Cloudflare Worker
-  /// free-tier idle-connection window (relays close before Claude finishes,
-  /// so the user sees "Connection timed out"). Each model in this list
-  /// reliably completes inside the Worker budget.
-  ///
-  /// Each model is tried up to twice in a row before advancing —
-  /// kie.ai sometimes flips between healthy/maintenance within seconds.
-  static const List<String> _fallbackChain = [
-    'gemini-2.5-flash',
-    'gemini-2.5-pro',
-  ];
+  /// Locked to gemini-2.5-flash (per user request, v1.6.4). The previous
+  /// fallback chain caused unpredictable behavior — slow Pro/Claude calls
+  /// would timeout, the user couldn't tell which model failed and how to
+  /// retry. Now if Flash is unavailable we just retry it 3 times then
+  /// surface a clean error.
+  static const List<String> _fallbackChain = ['gemini-2.5-flash'];
 
-  static const int _retriesPerModel = 2;
+  static const int _retriesPerModel = 3;
 
   bool _isClaude(String m) => m.startsWith('claude-');
 

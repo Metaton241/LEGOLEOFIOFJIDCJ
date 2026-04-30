@@ -37,18 +37,12 @@ class LegoLoader extends StatefulWidget {
 }
 
 class _LegoLoaderState extends State<LegoLoader> {
-  Timer? _tick;
   Timer? _msgTick;
-  int _elapsed = 0; // seconds
   int _msgIdx = 0;
 
   @override
   void initState() {
     super.initState();
-    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      setState(() => _elapsed++);
-    });
     _msgTick = Timer.periodic(const Duration(seconds: 7), (_) {
       if (!mounted) return;
       setState(() =>
@@ -58,15 +52,8 @@ class _LegoLoaderState extends State<LegoLoader> {
 
   @override
   void dispose() {
-    _tick?.cancel();
     _msgTick?.cancel();
     super.dispose();
-  }
-
-  String _fmt(int sec) {
-    final m = sec ~/ 60;
-    final s = sec % 60;
-    return '$m:${s.toString().padLeft(2, '0')}';
   }
 
   @override
@@ -114,16 +101,6 @@ class _LegoLoaderState extends State<LegoLoader> {
                     color: Colors.white,
                     letterSpacing: -0.1,
                   ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                _fmt(_elapsed),
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: AppColors.amber,
-                  fontFeatures: [FontFeature.tabularFigures()],
-                  fontWeight: FontWeight.w600,
                 ),
               ),
               if (widget.progressTotal > 0) ...[

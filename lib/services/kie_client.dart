@@ -39,6 +39,13 @@ class KieClient {
   int _maxSideFor(String m) => _isClaude(m) ? 800 : 1280;
   int _qualityFor(String m) => _isClaude(m) ? 75 : 80;
 
+  /// Short string included in error messages so users can tell whether the
+  /// request went through the proxy or direct.
+  String get _proxyTag {
+    final cfg = ProxyConfig.fromEnv();
+    return cfg == null ? 'direct' : 'via ${cfg.host}:${cfg.port}';
+  }
+
   KieClient({
     required String apiKey,
     String baseUrl = 'https://api.kie.ai',
@@ -49,7 +56,10 @@ class KieClient {
         _dio = dio ??
             Dio(BaseOptions(
               baseUrl: baseUrl,
-              connectTimeout: const Duration(seconds: 30),
+              // 90s on connect — when going through an HTTP proxy from a
+              // mobile carrier, the CONNECT handshake + 407 auth round-trip
+              // can occasionally take 40–60s. 30s was too tight.
+              connectTimeout: const Duration(seconds: 90),
               sendTimeout: const Duration(seconds: 120),
               receiveTimeout: const Duration(minutes: 6),
               responseType: ResponseType.json,
@@ -229,9 +239,20 @@ class KieClient {
             e.type == DioExceptionType.sendTimeout ||
             e.type == DioExceptionType.receiveTimeout ||
             e.type == DioExceptionType.connectionError;
-        lastErr = code > 0
-            ? 'kie.ai $m: HTTP $code (${e.message})'
-            : 'kie.ai $m: ${e.message}';
+
+        // Build a richer message so the user can tell whether it's a TCP
+        // failure (proxy unreachable), TLS issue, auth (407), or upstream.
+        final parts = <String>[];
+        parts.add(e.type.toString().split('.').last); // e.g. connectionError
+        if (code > 0) parts.add('HTTP $code');
+        final msg = (e.message ?? '').trim();
+        if (msg.isNotEmpty) parts.add(msg);
+        final inner = e.error?.toString().trim() ?? '';
+        if (inner.isNotEmpty && inner != msg) parts.add(inner);
+        final proxyTag = _proxyTag;
+        if (proxyTag.isNotEmpty) parts.add(proxyTag);
+        lastErr = 'kie.ai $m: ${parts.join(' · ')}';
+
         if (isTransient) {
           resp = null;
           continue;

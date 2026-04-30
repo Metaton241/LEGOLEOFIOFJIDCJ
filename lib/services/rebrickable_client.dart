@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 
 import '../models/lego_part.dart';
+import 'proxy_config.dart';
 
 class RebrickableException implements Exception {
   final String message;
@@ -27,7 +28,9 @@ class RebrickableClient {
               connectTimeout: const Duration(seconds: 15),
               receiveTimeout: const Duration(seconds: 30),
               responseType: ResponseType.json,
-            ));
+            )) {
+    if (dio == null) applyEnvProxy(_dio);
+  }
 
   bool get isConfigured => apiKey.trim().isNotEmpty;
 

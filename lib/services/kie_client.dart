@@ -7,6 +7,7 @@ import '../models/detection.dart';
 import '../models/lego_part.dart';
 import 'image_service.dart';
 import 'prompts.dart';
+import 'proxy_config.dart';
 
 class KieException implements Exception {
   final String message;
@@ -52,7 +53,11 @@ class KieClient {
               sendTimeout: const Duration(seconds: 120),
               receiveTimeout: const Duration(minutes: 6),
               responseType: ResponseType.json,
-            ));
+            )) {
+    // Route through HTTP proxy from .env when one is configured. We only do
+    // this when the caller didn't pass their own Dio (so tests can opt out).
+    if (dio == null) applyEnvProxy(_dio);
+  }
 
   Future<List<LegoPart>> parseInventory(File image) async {
     final b64 = await ImageService.compressAndEncode(

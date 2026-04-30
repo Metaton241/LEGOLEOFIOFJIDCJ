@@ -2,6 +2,8 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
+import 'proxy_config.dart';
+
 /// One candidate match for an uploaded image from the Brickognize API.
 class BrickognizeItem {
   final String id; // LEGO design id, e.g. "3001"
@@ -52,7 +54,9 @@ class BrickognizeClient {
               headers: {
                 'User-Agent': 'TwinkLegoFinder/1.0 (flutter)',
               },
-            ));
+            )) {
+    if (dio == null) applyEnvProxy(_dio);
+  }
 
   /// Submit a cropped brick image and get the ranked list of candidate parts.
   /// Returns the top items (usually 1-5). Empty list on failure.

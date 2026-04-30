@@ -61,8 +61,10 @@ class KieClient {
             Dio(BaseOptions(
               baseUrl: baseUrl,
               connectTimeout: const Duration(seconds: 30),
-              sendTimeout: const Duration(seconds: 120),
-              receiveTimeout: const Duration(minutes: 6),
+              sendTimeout: const Duration(seconds: 60),
+              // 2 minutes: long enough for slow Claude responses but short
+              // enough to fail-fast and let the fallback chain kick in.
+              receiveTimeout: const Duration(minutes: 2),
               responseType: ResponseType.json,
               // Cloudflare's *.workers.dev anti-bot heuristic returns
               // HTTP 403 (error code 1010) for "non-browser" User-Agents
@@ -101,19 +103,76 @@ class KieClient {
       maxSide: _maxSideFor(_model),
       quality: _qualityFor(_model),
     );
+    return _findPartsWithBase64(b64, parts);
+  }
+
+  /// Same as [findParts] but runs N model calls in parallel, each searching for
+  /// a slice of the inventory. Each slice prompt is smaller, so the model
+  /// answers faster and we duck under the Cloudflare Worker free-tier
+  /// per-request wall-clock limit (~30s on a single subrequest).
+  ///
+  /// The image is encoded ONCE and shared across slices. Results are merged
+  /// then run through the same post-processing (NMS + per-part qty cap) using
+  /// the FULL inventory so dedup works across slices.
+  Future<List<Detection>> findPartsParallel(
+    File image,
+    List<LegoPart> parts, {
+    int splits = 2,
+  }) async {
+    if (splits < 2 || parts.length < 2) {
+      return findParts(image, parts);
+    }
+    final b64 = await ImageService.compressAndEncode(
+      image,
+      maxSide: _maxSideFor(_model),
+      quality: _qualityFor(_model),
+    );
+
+    // Split inventory into roughly-equal chunks.
+    final chunks = <List<LegoPart>>[];
+    final chunkSize = (parts.length / splits).ceil();
+    for (var i = 0; i < parts.length; i += chunkSize) {
+      final end = (i + chunkSize).clamp(0, parts.length);
+      chunks.add(parts.sublist(i, end));
+    }
+
+    // Run all chunk calls concurrently; each call uses the same image bytes.
+    final futures = chunks.map((chunk) => _findRaw(b64, chunk)).toList();
+    final results = await Future.wait(futures);
+
+    // Merge raw detections (already filtered per slice) and re-run global
+    // post-processing with the FULL inventory so cross-slice NMS works and
+    // qty caps reflect the union.
+    final merged = <Detection>[];
+    for (final list in results) {
+      merged.addAll(list);
+    }
+    return _postProcess(merged, parts);
+  }
+
+  /// Internal helper used by both [findParts] and [findPartsParallel].
+  /// Runs one model call against [parts] using a pre-encoded [imageB64]
+  /// and returns the filtered (but not yet NMS'd) detections.
+  Future<List<Detection>> _findRaw(
+      String imageB64, List<LegoPart> parts) async {
     final partsJson = jsonEncode(parts.map((p) => p.toJson()).toList());
-    final json = await _chat(Prompts.findParts(partsJson), b64);
+    final json = await _chat(Prompts.findParts(partsJson), imageB64);
     final dets = (json['detections'] as List?) ?? const [];
-    final raw = dets
+    return dets
         .whereType<Map>()
         .map((m) => Detection.fromJson(m.cast<String, dynamic>()))
         .where((d) =>
             d.partId.isNotEmpty &&
             d.bbox.length == 4 &&
-            d.w >= 0.015 && // at least 1.5% of image width
+            d.w >= 0.015 &&
             d.h >= 0.015 &&
-            d.confidence >= 0.65) // keep only confident matches
+            d.confidence >= 0.65)
         .toList();
+  }
+
+  Future<List<Detection>> _findPartsWithBase64(
+      String b64, List<LegoPart> parts) async {
+    final raw = await _findRaw(b64, parts);
     return _postProcess(raw, parts);
   }
 

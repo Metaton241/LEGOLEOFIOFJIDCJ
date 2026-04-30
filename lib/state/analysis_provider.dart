@@ -195,10 +195,15 @@ class AnalysisController extends StateNotifier<AnalysisState> {
       pileImage: pileImage,
       busy: true,
       clearError: true,
-      progressLabel: 'Ищу детали в куче…',
+      progressLabel: 'Ищу детали в куче (2 потока)…',
     );
     try {
-      final raw = await _client.findParts(pileImage, state.inventory);
+      // 2-stream parallel search: split inventory in half, run both halves
+      // concurrently. Each call answers ~50% faster and keeps every model
+      // subrequest under the Cloudflare Worker free-tier ~30s wall clock.
+      final raw = state.inventory.length >= 4
+          ? await _client.findPartsParallel(pileImage, state.inventory, splits: 2)
+          : await _client.findParts(pileImage, state.inventory);
       final byId = {for (final p in state.inventory) p.partId: p};
       final inventoryIds = byId.keys.toSet();
       final detections = raw

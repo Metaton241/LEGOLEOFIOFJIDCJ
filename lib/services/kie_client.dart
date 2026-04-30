@@ -60,13 +60,20 @@ class KieClient {
         _dio = dio ??
             Dio(BaseOptions(
               baseUrl: baseUrl,
-              // 90s on connect — when going through an HTTP proxy from a
-              // mobile carrier, the CONNECT handshake + 407 auth round-trip
-              // can occasionally take 40–60s. 30s was too tight.
-              connectTimeout: const Duration(seconds: 90),
+              connectTimeout: const Duration(seconds: 30),
               sendTimeout: const Duration(seconds: 120),
               receiveTimeout: const Duration(minutes: 6),
               responseType: ResponseType.json,
+              // Cloudflare's *.workers.dev anti-bot heuristic returns
+              // HTTP 403 (error code 1010) for "non-browser" User-Agents
+              // including the default Dart `Dart/<version> (dart:io)` UA.
+              // Send a plausible iOS Safari UA so requests aren't rejected.
+              headers: {
+                'User-Agent':
+                    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) '
+                        'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 '
+                        'Mobile/15E148 Safari/604.1',
+              },
             )) {
     // Route through HTTP proxy from .env when one is configured. We only do
     // this when the caller didn't pass their own Dio (so tests can opt out).

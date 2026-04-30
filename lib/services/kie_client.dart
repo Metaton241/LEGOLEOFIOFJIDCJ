@@ -35,9 +35,11 @@ class KieClient {
 
   bool _isClaude(String m) => m.startsWith('claude-');
 
-  // Claude has tighter context limits — shrink images before sending.
-  int _maxSideFor(String m) => _isClaude(m) ? 800 : 1280;
-  int _qualityFor(String m) => _isClaude(m) ? 75 : 80;
+  // Claude has tighter context limits AND processes images much slower than
+  // Gemini. Shrink to 640px / quality 70 so Claude turnaround drops below
+  // the 4-min receiveTimeout even on dense inventory pages.
+  int _maxSideFor(String m) => _isClaude(m) ? 640 : 1280;
+  int _qualityFor(String m) => _isClaude(m) ? 70 : 80;
 
   /// Short string included in error messages so users can tell whether the
   /// request went through the Cloudflare Worker relay or hit kie.ai directly.
@@ -62,9 +64,11 @@ class KieClient {
               baseUrl: baseUrl,
               connectTimeout: const Duration(seconds: 30),
               sendTimeout: const Duration(seconds: 60),
-              // 2 minutes: long enough for slow Claude responses but short
-              // enough to fail-fast and let the fallback chain kick in.
-              receiveTimeout: const Duration(minutes: 2),
+              // 4 minutes: Claude inventory parsing on kie.ai can take
+              // 90-180s for dense inventory pages. The fallback chain
+              // already advances on connectionError/transient errors, so
+              // 4 min is the genuine "Claude took its sweet time" budget.
+              receiveTimeout: const Duration(minutes: 4),
               responseType: ResponseType.json,
               // Cloudflare's *.workers.dev anti-bot heuristic returns
               // HTTP 403 (error code 1010) for "non-browser" User-Agents

@@ -25,13 +25,22 @@ class KieClient {
   /// Models to fall back to (in order) when the primary returns
   /// "currently being maintained", "Model not supported", or a transient
   /// gateway error. Cross-family is fine — _chat() picks the right endpoint
-  /// per model. Models are listed in order of preference; only currently
-  /// supported kie.ai models should appear here.
+  /// per model.
+  ///
+  /// Claude is intentionally excluded: kie.ai's claude endpoint typically
+  /// takes 60-180s for vision+JSON, which exceeds the Cloudflare Worker
+  /// free-tier idle-connection window (relays close before Claude finishes,
+  /// so the user sees "Connection timed out"). Each model in this list
+  /// reliably completes inside the Worker budget.
+  ///
+  /// Each model is tried up to twice in a row before advancing —
+  /// kie.ai sometimes flips between healthy/maintenance within seconds.
   static const List<String> _fallbackChain = [
     'gemini-2.5-flash',
     'gemini-2.5-pro',
-    'claude-sonnet-4-5',
   ];
+
+  static const int _retriesPerModel = 2;
 
   bool _isClaude(String m) => m.startsWith('claude-');
 
@@ -62,13 +71,13 @@ class KieClient {
         _dio = dio ??
             Dio(BaseOptions(
               baseUrl: baseUrl,
-              connectTimeout: const Duration(seconds: 30),
-              sendTimeout: const Duration(seconds: 60),
-              // 4 minutes: Claude inventory parsing on kie.ai can take
-              // 90-180s for dense inventory pages. The fallback chain
-              // already advances on connectionError/transient errors, so
-              // 4 min is the genuine "Claude took its sweet time" budget.
-              receiveTimeout: const Duration(minutes: 4),
+              connectTimeout: const Duration(seconds: 20),
+              sendTimeout: const Duration(seconds: 30),
+              // 90 seconds: covers Gemini Pro vision response time
+              // (~30-60s for dense inventory). Cloudflare Worker free tier
+              // closes idle connections before this anyway, so any longer
+              // is just waiting for nothing — fallback will advance faster.
+              receiveTimeout: const Duration(seconds: 90),
               responseType: ResponseType.json,
               // Cloudflare's *.workers.dev anti-bot heuristic returns
               // HTTP 403 (error code 1010) for "non-browser" User-Agents
@@ -238,10 +247,15 @@ class KieClient {
 
   Future<Map<String, dynamic>> _chat(String prompt, String imageBase64) async {
     // Try the primary model first; if kie.ai returns "currently being
-    // maintained", auto-fallback to other models in the chain.
-    final candidates = <String>[
+    // maintained", auto-fallback to other models in the chain. Each model
+    // is attempted up to [_retriesPerModel] times in a row, since kie.ai
+    // sometimes flips healthy/maintenance state within seconds.
+    final base = <String>[
       _model,
       ..._fallbackChain.where((m) => m != _model),
+    ];
+    final candidates = <String>[
+      for (final m in base) ...List.filled(_retriesPerModel, m),
     ];
     Response? resp;
     String? lastErr;

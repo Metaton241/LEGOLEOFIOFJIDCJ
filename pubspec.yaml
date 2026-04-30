@@ -1,7 +1,7 @@
 name: twink_lego_finder
 description: "LEGO part finder — scan inventory, find parts in a pile."
 publish_to: 'none'
-version: 1.6.2+18
+version: 1.6.3+19
 
 environment:
   sdk: ^3.11.4

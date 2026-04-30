@@ -191,18 +191,25 @@ class AnalysisController extends StateNotifier<AnalysisState> {
   /// inventory. Each detection is annotated with its inventory name and
   /// `matched` flag, then committed.
   Future<void> analyzePileAuto(File pileImage) async {
+    // Choose split based on inventory size:
+    //   <4 items  → single call (parallelism overhead exceeds benefit)
+    //   4-8 items → 2 streams (split overhead vs win is roughly even)
+    //   9+  items → 3 streams (each chunk ~33% of inventory)
+    final invSize = state.inventory.length;
+    final splits = invSize >= 9 ? 3 : (invSize >= 4 ? 2 : 1);
+
     state = state.copyWith(
       pileImage: pileImage,
       busy: true,
       clearError: true,
-      progressLabel: 'Ищу детали в куче (2 потока)…',
+      progressLabel: splits > 1
+          ? 'Ищу детали в куче ($splits потока)…'
+          : 'Ищу детали в куче…',
     );
     try {
-      // 2-stream parallel search: split inventory in half, run both halves
-      // concurrently. Each call answers ~50% faster and keeps every model
-      // subrequest under the Cloudflare Worker free-tier ~30s wall clock.
-      final raw = state.inventory.length >= 4
-          ? await _client.findPartsParallel(pileImage, state.inventory, splits: 2)
+      final raw = splits > 1
+          ? await _client.findPartsParallel(pileImage, state.inventory,
+              splits: splits)
           : await _client.findParts(pileImage, state.inventory);
       final byId = {for (final p in state.inventory) p.partId: p};
       final inventoryIds = byId.keys.toSet();
